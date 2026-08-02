@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [develop, stage, main]
+  pull_request:
+    branches: [develop, stage, main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: typecheck · test · build
+    runs-on: ${{ vars.RUNNER_LINUX_X64_4 || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - name: Install
+        run: npm ci --registry ${{ vars.VERDACCIO_REGISTRY || 'https://registry.npmjs.org' }}
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify both module formats resolve
+        run: |
+          node -e "import('./dist/esm/index.js').then(m => { if (!m.TermsAcceptanceService) process.exit(1); console.log('esm ok'); })"
+          node -e "const m = require('./dist/cjs/index.js'); if (!m.TermsAcceptanceService) process.exit(1); console.log('cjs ok');"

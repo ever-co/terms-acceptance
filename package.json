@@ -1,0 +1,129 @@
+{
+	"name": "terms-acceptance",
+	"version": "0.1.0",
+	"description": "Versioned, provable terms-of-service acceptance records. Storage-agnostic core plus adapters for TypeORM/NestJS, Better Auth, Clerk and Firebase Auth, and an optional React checkbox and re-accept modal.",
+	"license": "MIT",
+	"author": "Ever Co. LTD",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/ever-co/terms-acceptance.git"
+	},
+	"bugs": {
+		"url": "https://github.com/ever-co/terms-acceptance/issues"
+	},
+	"homepage": "https://github.com/ever-co/terms-acceptance#readme",
+	"type": "module",
+	"sideEffects": false,
+	"engines": {
+		"node": ">=20"
+	},
+	"files": [
+		"dist",
+		"README.md",
+		"LICENSE",
+		"CHANGELOG.md"
+	],
+	"main": "./dist/cjs/index.js",
+	"module": "./dist/esm/index.js",
+	"types": "./dist/esm/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/esm/index.d.ts",
+			"import": "./dist/esm/index.js",
+			"require": "./dist/cjs/index.js"
+		},
+		"./typeorm": {
+			"types": "./dist/esm/adapters/typeorm/index.d.ts",
+			"import": "./dist/esm/adapters/typeorm/index.js",
+			"require": "./dist/cjs/adapters/typeorm/index.js"
+		},
+		"./better-auth": {
+			"types": "./dist/esm/adapters/better-auth/index.d.ts",
+			"import": "./dist/esm/adapters/better-auth/index.js",
+			"require": "./dist/cjs/adapters/better-auth/index.js"
+		},
+		"./clerk": {
+			"types": "./dist/esm/adapters/clerk/index.d.ts",
+			"import": "./dist/esm/adapters/clerk/index.js",
+			"require": "./dist/cjs/adapters/clerk/index.js"
+		},
+		"./firebase": {
+			"types": "./dist/esm/adapters/firebase/index.d.ts",
+			"import": "./dist/esm/adapters/firebase/index.js",
+			"require": "./dist/cjs/adapters/firebase/index.js"
+		},
+		"./sql": {
+			"types": "./dist/esm/adapters/sql.d.ts",
+			"import": "./dist/esm/adapters/sql.js",
+			"require": "./dist/cjs/adapters/sql.js"
+		},
+		"./memory": {
+			"types": "./dist/esm/adapters/memory.d.ts",
+			"import": "./dist/esm/adapters/memory.js",
+			"require": "./dist/cjs/adapters/memory.js"
+		},
+		"./react": {
+			"types": "./dist/esm/react/index.d.ts",
+			"import": "./dist/esm/react/index.js",
+			"require": "./dist/cjs/react/index.js"
+		},
+		"./package.json": "./package.json"
+	},
+	"typesVersions": {
+		"*": {
+			"typeorm": ["./dist/esm/adapters/typeorm/index.d.ts"],
+			"better-auth": ["./dist/esm/adapters/better-auth/index.d.ts"],
+			"clerk": ["./dist/esm/adapters/clerk/index.d.ts"],
+			"firebase": ["./dist/esm/adapters/firebase/index.d.ts"],
+			"sql": ["./dist/esm/adapters/sql.d.ts"],
+			"memory": ["./dist/esm/adapters/memory.d.ts"],
+			"react": ["./dist/esm/react/index.d.ts"]
+		}
+	},
+	"scripts": {
+		"clean": "node scripts/clean.mjs",
+		"build": "npm run clean && tsc -p tsconfig.esm.json && tsc -p tsconfig.cjs.json && node scripts/postbuild.mjs",
+		"typecheck": "tsc -p tsconfig.json --noEmit",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"check": "npm run typecheck && npm run test && npm run build",
+		"prepublishOnly": "npm run check"
+	},
+	"dependencies": {},
+	"peerDependencies": {
+		"react": "^18.2.0 || ^19.0.0"
+	},
+	"peerDependenciesMeta": {
+		"react": {
+			"optional": true
+		}
+	},
+	"devDependencies": {
+		"@types/node": "^22.10.2",
+		"@types/react": "^19.2.2",
+		"react": "^19.2.0",
+		"typescript": "^5.9.3",
+		"vitest": "^3.2.4"
+	},
+	"publishConfig": {
+		"access": "public",
+		"provenance": false
+	},
+	"keywords": [
+		"terms",
+		"terms-of-service",
+		"tos",
+		"acceptance",
+		"consent",
+		"gdpr",
+		"audit",
+		"compliance",
+		"legal",
+		"re-acceptance",
+		"better-auth",
+		"clerk",
+		"firebase",
+		"typeorm",
+		"nestjs"
+	]
+}
