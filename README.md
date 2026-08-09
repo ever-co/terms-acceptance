@@ -279,7 +279,11 @@ export const auth = betterAuth({
 ```
 
 Adds `GET /terms-acceptance/status` and `POST /terms-acceptance/accept`. Omit
-`createAuthEndpoint` to get the schema and adapter only and wire your own routes.
+`createAuthEndpoint` to get the schema and adapter only and wire your own routes — the result
+then has no `endpoints` key at all, so nothing about the endpoint type can clash with
+`BetterAuthPlugin`. When you do inject it, `createAuthEndpoint`'s own return type is carried
+through to `endpoints`, which is how the plugin satisfies Better Auth's
+`{ [key: string]: Endpoint }` without this package importing `better-auth`.
 
 Note the `userId` reference has **no** `onDelete: 'cascade'`: deleting a user should not silently
 destroy the proof that they once agreed to something. If a jurisdiction requires erasure, do it

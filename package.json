@@ -1,6 +1,6 @@
 {
 	"name": "terms-acceptance",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "Versioned, provable terms-of-service acceptance records. Storage-agnostic core plus adapters for TypeORM/NestJS, Better Auth, Clerk and Firebase Auth, and an optional React checkbox and re-accept modal.",
 	"license": "MIT",
 	"author": "Ever Co. LTD",

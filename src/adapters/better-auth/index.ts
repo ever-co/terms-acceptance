@@ -205,18 +205,29 @@ export interface BetterAuthEndpointContext {
 	[key: string]: unknown;
 }
 
-/** `createAuthEndpoint` from `better-auth/api`, injected. */
-export type CreateAuthEndpoint = (
+/**
+ * `createAuthEndpoint` from `better-auth/api`, injected.
+ *
+ * `TEndpoint` is whatever the injected function returns, and it is inferred at the
+ * call site rather than fixed here. That matters: Better Auth's `plugins` array is
+ * typed `BetterAuthPlugin[]`, whose `endpoints` must be `{ [key: string]: Endpoint }`.
+ * Hard-coding this to `unknown` made the endpoints branch of the returned plugin
+ * unassignable to `BetterAuthPlugin`, so registering the plugin failed to compile —
+ * even for consumers who never mount the endpoints. Threading the type through keeps
+ * this module free of any `better-auth` import while letting the consumer's own
+ * `Endpoint` type reach the result.
+ */
+export type CreateAuthEndpoint<TEndpoint = unknown> = (
 	path: string,
 	options: Record<string, unknown>,
 	handler: (ctx: BetterAuthEndpointContext) => Promise<unknown>
-) => unknown;
+) => TEndpoint;
 
-export interface TermsAcceptancePluginOptions {
+export interface TermsAcceptancePluginOptions<TEndpoint = unknown> {
 	/** Documents that gate access. Usually built with `selectRequiredDocuments(corpus, …)`. */
 	required: RequiredDocument[] | (() => RequiredDocument[] | Promise<RequiredDocument[]>);
 	/** `createAuthEndpoint` from `better-auth/api`. Omit to get schema + helpers only. */
-	createAuthEndpoint?: CreateAuthEndpoint;
+	createAuthEndpoint?: CreateAuthEndpoint<TEndpoint>;
 	/** `sessionMiddleware` from `better-auth/api`. Strongly recommended when adding endpoints. */
 	sessionMiddleware?: unknown;
 	/** Per-deployment secret for hashing client IPs. Omit to not record IPs at all. */
@@ -226,6 +237,24 @@ export interface TermsAcceptancePluginOptions {
 	evaluate?: EvaluateOptions;
 }
 
+/** The `id` + model declaration the plugin always contributes. */
+function buildBase(model: string | undefined) {
+	return {
+		id: 'terms-acceptance',
+		schema: model
+			? { [model]: { ...termsAcceptanceSchema.termsAcceptance, modelName: model } }
+			: termsAcceptanceSchema,
+	};
+}
+
+/** What the plugin resolves to when `createAuthEndpoint` is not injected. */
+export type TermsAcceptanceSchemaPlugin = ReturnType<typeof buildBase>;
+
+/** …and with the two routes mounted, carrying the injected framework's own endpoint type. */
+export type TermsAcceptanceEndpointPlugin<TEndpoint> = TermsAcceptanceSchemaPlugin & {
+	endpoints: { termsAcceptanceStatus: TEndpoint; termsAcceptanceAccept: TEndpoint };
+};
+
 /**
  * Build the Better Auth plugin.
  *
@@ -234,8 +263,21 @@ export interface TermsAcceptancePluginOptions {
  *
  * - `GET  /terms-acceptance/status` — what the signed-in user still owes.
  * - `POST /terms-acceptance/accept` — record acceptance for the outstanding documents.
+ *
+ * The two cases are distinguished at the type level, not merged into a union: a
+ * consumer that omits `createAuthEndpoint` gets a plugin with no `endpoints` key at
+ * all, so nothing about the endpoint type can make the result unassignable to
+ * `BetterAuthPlugin`.
  */
-export function termsAcceptancePlugin(options: TermsAcceptancePluginOptions) {
+export function termsAcceptancePlugin(
+	options: TermsAcceptancePluginOptions & { createAuthEndpoint?: undefined }
+): TermsAcceptanceSchemaPlugin;
+export function termsAcceptancePlugin<TEndpoint>(
+	options: TermsAcceptancePluginOptions<TEndpoint> & { createAuthEndpoint: CreateAuthEndpoint<TEndpoint> }
+): TermsAcceptanceEndpointPlugin<TEndpoint>;
+export function termsAcceptancePlugin<TEndpoint>(
+	options: TermsAcceptancePluginOptions<TEndpoint>
+): TermsAcceptanceSchemaPlugin | TermsAcceptanceEndpointPlugin<TEndpoint> {
 	const model = options.model ?? 'termsAcceptance';
 	const resolveRequired = async (): Promise<RequiredDocument[]> =>
 		typeof options.required === 'function' ? await options.required() : options.required;
@@ -248,12 +290,7 @@ export function termsAcceptancePlugin(options: TermsAcceptancePluginOptions) {
 			...(options.evaluate?.onTextMismatch ? { onTextMismatch: options.evaluate.onTextMismatch } : {}),
 		});
 
-	const base = {
-		id: 'terms-acceptance',
-		schema: options.model
-			? { [options.model]: { ...termsAcceptanceSchema.termsAcceptance, modelName: options.model } }
-			: termsAcceptanceSchema,
-	};
+	const base = buildBase(options.model);
 
 	if (!options.createAuthEndpoint) return base;
 

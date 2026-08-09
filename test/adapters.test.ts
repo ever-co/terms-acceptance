@@ -269,6 +269,44 @@ describe('Better Auth adapter', () => {
 		expect(clientIp({ 'cf-connecting-ip': '203.0.113.9' })).toBe('203.0.113.9');
 		expect(clientIp({})).toBeNull();
 	});
+
+	// Better Auth types `plugins` as `BetterAuthPlugin[]`, and `endpoints` on that
+	// interface must be `{ [key: string]: Endpoint }`. When the injected endpoint type
+	// was pinned to `unknown`, the endpoints branch of the return type was unassignable
+	// and `betterAuth({ plugins: [termsAcceptancePlugin(…)] })` did not compile — for
+	// every consumer, including the ones that never mount the endpoints. These stand in
+	// for the framework's constraint so `tsc` catches a regression before publish.
+	it('produces a plugin object Better Auth will accept', () => {
+		// Mirrors Better Auth's own `Endpoint`, which is `(inputCtx: any) => Promise<any>`.
+		type Endpoint = (inputCtx: any) => Promise<any>;
+		interface BetterAuthPluginLike {
+			id: string;
+			schema?: Record<string, { fields: Record<string, unknown>; modelName?: string }>;
+			endpoints?: Record<string, Endpoint>;
+		}
+
+		// Endpoints omitted: the result must carry no `endpoints` key to constrain.
+		const schemaOnly = termsAcceptancePlugin({ required: [tosV1] });
+		const asPlugin: BetterAuthPluginLike = schemaOnly;
+		expect(asPlugin.id).toBe('terms-acceptance');
+		expect('endpoints' in schemaOnly).toBe(false);
+
+		// Endpoints injected: the framework's own endpoint type reaches the result,
+		// rather than being flattened to `unknown`.
+		const createAuthEndpoint = (_path: string, _options: Record<string, unknown>, handler: Endpoint): Endpoint =>
+			handler;
+		const withEndpoints = termsAcceptancePlugin({ required: [tosV1], createAuthEndpoint });
+		const mounted: BetterAuthPluginLike = withEndpoints;
+		expect(Object.keys(withEndpoints.endpoints)).toEqual(['termsAcceptanceStatus', 'termsAcceptanceAccept']);
+		expect(typeof mounted.endpoints!['termsAcceptanceStatus']).toBe('function');
+	});
+
+	it('renames the model everywhere when one is given', () => {
+		const plugin = termsAcceptancePlugin({ required: [tosV1], model: 'tos_acceptance' });
+		const schema = plugin.schema as Record<string, { modelName?: string }>;
+		expect(Object.keys(schema)).toEqual(['tos_acceptance']);
+		expect(schema['tos_acceptance']!.modelName).toBe('tos_acceptance');
+	});
 });
 
 /* ----------------------------------------------------------------- Clerk */
