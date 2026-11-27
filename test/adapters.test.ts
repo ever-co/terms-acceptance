@@ -2,7 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 import { MemoryAcceptanceAdapter } from '../src/adapters/memory.js';
 import { BetterAuthAcceptanceAdapter, clientIp, termsAcceptancePlugin } from '../src/adapters/better-auth/index.js';
 import { buildClerkAcceptanceMetadata, createClerkWebhookHandler } from '../src/adapters/clerk/index.js';
-import { FIRESTORE_RULES, FirebaseAcceptanceAdapter, acceptanceDocId } from '../src/adapters/firebase/index.js';
+import {
+	FIRESTORE_INDEXES,
+	FIRESTORE_RULES,
+	FirebaseAcceptanceAdapter,
+	acceptanceDocId,
+} from '../src/adapters/firebase/index.js';
 import { SqlAcceptanceAdapter, createTableSql, rowToRecord } from '../src/adapters/sql.js';
 import {
 	CreateTermsAcceptance1754000000000,
@@ -378,11 +383,18 @@ describe('Clerk adapter', () => {
 
 /* -------------------------------------------------------------- Firebase */
 
+/**
+ * A fake Firestore with no composite indexes, which is what a real project has until
+ * someone deploys them. Like the real one, it builds an ordered query without
+ * complaint and then rejects `get()` with `9 FAILED_PRECONDITION`. The emulator and
+ * a naive fake both accept the query, which is how 0.1.1 shipped broken.
+ */
 function fakeFirestore() {
 	const store = new Map<string, Record<string, unknown>>();
+	const orderByCalls: Array<[string, string | undefined]> = [];
 	const collection = (): ReturnType<typeof makeCollection> => makeCollection([]);
 
-	function makeCollection(filters: Array<[string, string, unknown]>) {
+	function makeCollection(filters: Array<[string, string, unknown]>, ordered = false) {
 		return {
 			doc(id: string) {
 				return {
@@ -396,12 +408,21 @@ function fakeFirestore() {
 				};
 			},
 			where(field: string, op: string, value: unknown) {
-				return makeCollection([...filters, [field, op, value]]);
+				return makeCollection([...filters, [field, op, value]], ordered);
 			},
-			orderBy() {
-				return makeCollection(filters);
+			orderBy(field: string, direction?: string) {
+				orderByCalls.push([field, direction]);
+				return makeCollection(filters, true);
 			},
 			async get() {
+				if (ordered && filters.length > 0) {
+					throw Object.assign(
+						new Error(
+							'9 FAILED_PRECONDITION: The query requires an index. You can create it here: https://console.firebase.google.com/'
+						),
+						{ code: 9 }
+					);
+				}
 				const docs = [...store.entries()]
 					.filter(([, data]) =>
 						filters.every(([field, op, value]) =>
@@ -414,7 +435,7 @@ function fakeFirestore() {
 		};
 	}
 
-	return { store, collection };
+	return { store, orderByCalls, collection };
 }
 
 describe('Firebase adapter', () => {
@@ -445,10 +466,96 @@ describe('Firebase adapter', () => {
 		);
 	});
 
+	it('fake: an ordered, filtered query fails the way Firestore does without a composite index', async () => {
+		const firestore = fakeFirestore();
+		const ordered = firestore.collection().where('subjectId', '==', 'firebase_uid_1').orderBy('acceptedAt', 'desc');
+		await expect(ordered.get()).rejects.toMatchObject({ code: 9, message: /FAILED_PRECONDITION/ });
+	});
+
+	it('lists without orderBy, so status(), latest() and history() work with no composite index', async () => {
+		const firestore = fakeFirestore();
+		const adapter = new FirebaseAcceptanceAdapter({ firestore: firestore as never });
+		const service = new TermsAcceptanceService({ adapter });
+		const subjectId = 'firebase_uid_1';
+		// Written out of order, so a correct result proves the local sort.
+		await service.record({ ...base, subjectId, version: '1.0.0', acceptedAt: '2026-01-01T00:00:00.000Z' });
+		await service.record({ ...base, subjectId, version: '3.0.0', acceptedAt: '2026-03-01T00:00:00.000Z' });
+		await service.record({ ...base, subjectId, version: '2.0.0', acceptedAt: '2026-02-01T00:00:00.000Z' });
+		await service.record({
+			...base,
+			subjectId,
+			documentId: 'privacy:demo',
+			acceptedAt: '2026-02-15T00:00:00.000Z',
+		});
+		// Rows each filter must drop: another subject, another tenant, a document not asked for.
+		await service.record({ ...base, subjectId: 'someone_else', acceptedAt: '2026-04-01T00:00:00.000Z' });
+		await service.record({ ...base, subjectId, tenantId: 'acme', acceptedAt: '2026-04-02T00:00:00.000Z' });
+		await service.record({
+			...base,
+			subjectId,
+			documentId: 'cookies:demo',
+			acceptedAt: '2026-04-03T00:00:00.000Z',
+		});
+
+		// status() → list({ subjectId, tenantId, documentIds }): the query that answered 500 in production.
+		const status = await service.status(subjectId, [
+			{ documentId: 'tos:demo', version: '3.0.0', sha256: TOS_V1_SHA, locale: 'en' },
+			{ documentId: 'privacy:demo', version: '1.0.0', sha256: TOS_V1_SHA, locale: 'en' },
+		]);
+		expect(status.satisfied).toBe(true);
+		expect(status.current.sort()).toEqual(['privacy:demo', 'tos:demo']);
+
+		const listed = await adapter.list({ subjectId, tenantId: null, documentIds: ['tos:demo', 'privacy:demo'] });
+		expect(listed.map((r) => `${r.documentId}@${r.version}`)).toEqual([
+			'tos:demo@3.0.0',
+			'privacy:demo@1.0.0',
+			'tos:demo@2.0.0',
+			'tos:demo@1.0.0',
+		]);
+
+		expect((await service.latest(subjectId, 'tos:demo'))!.version).toBe('3.0.0');
+
+		// history({ subjectId }) alone: subjectId == only, so every tenant and document.
+		const history = await service.history({ subjectId });
+		expect(history.map((r) => `${r.tenantId ?? '-'}/${r.documentId}@${r.version}`)).toEqual([
+			'-/cookies:demo@1.0.0',
+			'acme/tos:demo@1.0.0',
+			'-/tos:demo@3.0.0',
+			'-/privacy:demo@1.0.0',
+			'-/tos:demo@2.0.0',
+			'-/tos:demo@1.0.0',
+		]);
+
+		expect(firestore.orderByCalls).toEqual([]);
+	});
+
 	it('ships rules that deny update and delete', () => {
 		expect(FIRESTORE_RULES).toMatch(/allow update: if false/);
 		expect(FIRESTORE_RULES).toMatch(/allow delete: if false/);
 		expect(FIRESTORE_RULES).toMatch(/allow create: if false/);
+	});
+
+	it('exports the composite indexes as a firestore.indexes.json file', () => {
+		const fields = (index: (typeof FIRESTORE_INDEXES.indexes)[number]) =>
+			index.fields.map((f) => `${f.fieldPath} ${f.order}`);
+
+		expect(FIRESTORE_INDEXES.fieldOverrides).toEqual([]);
+		expect(FIRESTORE_INDEXES.indexes).toHaveLength(2);
+		for (const index of FIRESTORE_INDEXES.indexes) {
+			expect(index.collectionGroup).toBe('termsAcceptances');
+			expect(index.queryScope).toBe('COLLECTION');
+		}
+		expect(fields(FIRESTORE_INDEXES.indexes[0]!)).toEqual([
+			'documentId ASCENDING',
+			'subjectId ASCENDING',
+			'tenantId ASCENDING',
+			'acceptedAt DESCENDING',
+		]);
+		expect(fields(FIRESTORE_INDEXES.indexes[1]!)).toEqual(['subjectId ASCENDING', 'acceptedAt DESCENDING']);
+
+		// Serialises to exactly what `firebase deploy --only firestore:indexes` reads.
+		expect(JSON.parse(JSON.stringify(FIRESTORE_INDEXES))).toEqual(FIRESTORE_INDEXES);
+		expect(Object.isFrozen(FIRESTORE_INDEXES.indexes[0]!.fields[0])).toBe(true);
 	});
 });
 

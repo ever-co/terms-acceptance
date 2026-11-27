@@ -6,6 +6,31 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-11-27
+
+### Fixed
+
+- **Firebase** — `FirebaseAcceptanceAdapter.list()` failed on a real Firestore project with
+  `9 FAILED_PRECONDITION: The query requires an index`, so `status()`, `latest()` and
+  `history()` threw on every call (#8). It filtered on `subjectId`, `tenantId` and
+  `documentId in [...]` and then called `orderBy('acceptedAt', 'desc')`, and Firestore rejects
+  filters plus `orderBy` until a composite index exists. The local sort that was meant to cover
+  the missing index never ran, because the server refused the query first. The emulator does
+  not enforce indexes, so tests passed.
+
+  `list()` no longer calls `orderBy`. Equality and `in` filters are served from Firestore's
+  automatic single-field indexes, and the rows are sorted newest-first in memory as before. No
+  index has to be deployed. The test fake now rejects a filtered, ordered query the way an
+  unindexed project does, so a regression fails the suite.
+
+### Added
+
+- **Firebase** — `FIRESTORE_INDEXES`, a whole `firestore.indexes.json` with the two composite
+  indexes on `termsAcceptances` for code that orders by `acceptedAt` on the server (and for
+  deployments still on 0.1.1): `documentId`, `subjectId`, `tenantId` ASC + `acceptedAt` DESC,
+  and `subjectId` ASC + `acceptedAt` DESC. Types `FirestoreIndexesFile`,
+  `FirestoreCompositeIndex` and `FirestoreIndexField`.
+
 ## [0.1.1] — 2026-08-09
 
 ### Fixed
