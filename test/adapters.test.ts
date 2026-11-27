@@ -487,7 +487,15 @@ describe('Firebase adapter', () => {
 			documentId: 'privacy:demo',
 			acceptedAt: '2026-02-15T00:00:00.000Z',
 		});
+		// Rows each filter must drop: another subject, another tenant, a document not asked for.
 		await service.record({ ...base, subjectId: 'someone_else', acceptedAt: '2026-04-01T00:00:00.000Z' });
+		await service.record({ ...base, subjectId, tenantId: 'acme', acceptedAt: '2026-04-02T00:00:00.000Z' });
+		await service.record({
+			...base,
+			subjectId,
+			documentId: 'cookies:demo',
+			acceptedAt: '2026-04-03T00:00:00.000Z',
+		});
 
 		// status() → list({ subjectId, tenantId, documentIds }): the query that answered 500 in production.
 		const status = await service.status(subjectId, [
@@ -507,10 +515,16 @@ describe('Firebase adapter', () => {
 
 		expect((await service.latest(subjectId, 'tos:demo'))!.version).toBe('3.0.0');
 
-		// history({ subjectId }) alone: subjectId == only, no tenant or document filter.
+		// history({ subjectId }) alone: subjectId == only, so every tenant and document.
 		const history = await service.history({ subjectId });
-		expect(history).toHaveLength(4);
-		expect(history.map((r) => r.acceptedAt)).toEqual([...history.map((r) => r.acceptedAt)].sort().reverse());
+		expect(history.map((r) => `${r.tenantId ?? '-'}/${r.documentId}@${r.version}`)).toEqual([
+			'-/cookies:demo@1.0.0',
+			'acme/tos:demo@1.0.0',
+			'-/tos:demo@3.0.0',
+			'-/privacy:demo@1.0.0',
+			'-/tos:demo@2.0.0',
+			'-/tos:demo@1.0.0',
+		]);
 
 		expect(firestore.orderByCalls).toEqual([]);
 	});
