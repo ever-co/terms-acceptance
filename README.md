@@ -71,7 +71,7 @@ import `terms-acceptance/react`.
 | `terms-acceptance/typeorm`     | entity schema + migration (NestJS, own JWT)               |
 | `terms-acceptance/better-auth` | Better Auth plugin + model                                |
 | `terms-acceptance/clerk`       | webhook handler writing into *your* table                 |
-| `terms-acceptance/firebase`    | Firestore adapter + security rules                        |
+| `terms-acceptance/firebase`    | Firestore adapter + security rules + optional indexes     |
 | `terms-acceptance/react`       | `TermsCheckbox`, `ReacceptModal`, `useTermsGate`          |
 
 ---
@@ -354,6 +354,38 @@ export const acceptTerms = onCall(createAcceptCallable({ service: terms, require
 Deploy `FIRESTORE_RULES` (or fold it into yours): clients may read their own records and nothing
 else; create/update/delete are denied to everything rules apply to. The Admin SDK bypasses rules,
 so the server still writes.
+
+**No composite index needed.** The adapter reads with equality and `in` filters only
+(`subjectId ==`, `tenantId ==`, `documentId in [...]`), which Firestore serves from its automatic
+single-field indexes, and sorts newest-first in memory. It never calls `orderBy`: on a real
+project, filters plus `orderBy('acceptedAt')` fail with `9 FAILED_PRECONDITION: The query requires
+an index` until a composite index exists. Version 0.1.1 did call it, and `status()` failed on every
+call. The emulator does not enforce indexes, so only a real project shows this.
+
+`FIRESTORE_INDEXES` holds the two composite indexes for ordering the collection by `acceptedAt` on
+the server. Deploy them if you still run 0.1.1, or if your own code (an admin view, an export, a
+paginated history) queries `termsAcceptances` with `orderBy('acceptedAt')`:
+
+| Fields (collection `termsAcceptances`, scope `COLLECTION`)           | Serves                                    |
+| -------------------------------------------------------------------- | ----------------------------------------- |
+| `documentId` ASC, `subjectId` ASC, `tenantId` ASC, `acceptedAt` DESC | `status()` and `latest()` filters         |
+| `subjectId` ASC, `acceptedAt` DESC                                   | `history({ subjectId })`, no other filter |
+
+The value is a whole `firestore.indexes.json`. Write it out, or merge its `indexes` array into
+yours, then deploy:
+
+```ts
+import { writeFileSync } from 'node:fs';
+import { FIRESTORE_INDEXES } from 'terms-acceptance/firebase';
+
+writeFileSync('firestore.indexes.json', JSON.stringify(FIRESTORE_INDEXES, null, 2) + '\n');
+```
+
+```bash
+firebase deploy --only firestore:indexes
+```
+
+If you pass a custom `collection` to the adapter, change `collectionGroup` to match.
 
 ### Anything else
 
